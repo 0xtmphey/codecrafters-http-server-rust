@@ -2,6 +2,7 @@
 use std::{
     io::{BufRead, BufReader, Write},
     net::{TcpListener, TcpStream},
+    thread,
 };
 
 fn main() {
@@ -14,56 +15,60 @@ fn main() {
 
     for stream in listener.incoming() {
         match stream {
-            Ok(mut stream) => {
-                println!("accepted new connection");
-
-                let buffer = BufReader::new(&stream);
-
-                let response: Vec<_> = buffer
-                    .lines()
-                    .map(|s| s.unwrap())
-                    .take_while(|s| !s.is_empty())
-                    .take(3)
-                    .collect();
-
-                let path = response[0].split(' ').nth(1);
-
-                match path {
-                    Some(s) if s.starts_with("/echo/") => {
-                        let echo = &s[6..];
-                        let content_type = String::from("Content-type: text/plain");
-                        let content_len_header = format!("Content-length: {}", echo.len());
-                        Response::ok(
-                            vec![content_type, content_len_header],
-                            Some(echo.to_owned()),
-                        )
-                        .write_to(&mut stream);
-                    }
-                    Some(s) if s.starts_with("/user-agent") => {
-                        let user_agent_res = response.iter().find(|s| s.starts_with("User-Agent:"));
-
-                        let user_agent = match user_agent_res {
-                            Some(value) => value.split(": ").nth(1).unwrap_or(""),
-                            None => "",
-                        };
-
-                        let content_type = String::from("Content-type: text/plain");
-                        let content_len_header = format!("Content-length: {}", user_agent.len());
-                        Response::ok(
-                            vec![content_type, content_len_header],
-                            Some(user_agent.to_owned()),
-                        )
-                        .write_to(&mut stream);
-                    }
-                    Some("/") => Response::ok(vec![], None).write_to(&mut stream),
-                    _ => Response::not_found().write_to(&mut stream),
-                };
+            Ok(stream) => {
+                thread::spawn(move || process(stream));
             }
             Err(e) => {
                 println!("error: {}", e);
             }
         }
     }
+}
+
+fn process(mut stream: TcpStream) {
+    println!("accepted new connection");
+
+    let buffer = BufReader::new(&stream);
+
+    let response: Vec<_> = buffer
+        .lines()
+        .map(|s| s.unwrap())
+        .take_while(|s| !s.is_empty())
+        .take(3)
+        .collect();
+
+    let path = response[0].split(' ').nth(1);
+
+    match path {
+        Some(s) if s.starts_with("/echo/") => {
+            let echo = &s[6..];
+            let content_type = String::from("Content-type: text/plain");
+            let content_len_header = format!("Content-length: {}", echo.len());
+            Response::ok(
+                vec![content_type, content_len_header],
+                Some(echo.to_owned()),
+            )
+            .write_to(&mut stream);
+        }
+        Some(s) if s.starts_with("/user-agent") => {
+            let user_agent_res = response.iter().find(|s| s.starts_with("User-Agent:"));
+
+            let user_agent = match user_agent_res {
+                Some(value) => value.split(": ").nth(1).unwrap_or(""),
+                None => "",
+            };
+
+            let content_type = String::from("Content-type: text/plain");
+            let content_len_header = format!("Content-length: {}", user_agent.len());
+            Response::ok(
+                vec![content_type, content_len_header],
+                Some(user_agent.to_owned()),
+            )
+            .write_to(&mut stream);
+        }
+        Some("/") => Response::ok(vec![], None).write_to(&mut stream),
+        _ => Response::not_found().write_to(&mut stream),
+    };
 }
 
 struct Response {
