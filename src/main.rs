@@ -1,6 +1,6 @@
 // Uncomment this block to pass the first stage
 use std::{
-    io::{BufRead, BufReader, Read, Write},
+    io::{BufRead, BufReader, Write},
     net::{TcpListener, TcpStream},
 };
 
@@ -23,7 +23,7 @@ fn main() {
                     .lines()
                     .map(|s| s.unwrap())
                     .take_while(|s| !s.is_empty())
-                    .take(1)
+                    .take(3)
                     .collect();
 
                 let path = response[0].split(' ').nth(1);
@@ -36,6 +36,22 @@ fn main() {
                         Response::ok(
                             vec![content_type, content_len_header],
                             Some(echo.to_owned()),
+                        )
+                        .write_to(&mut stream);
+                    }
+                    Some(s) if s.starts_with("/user-agent") => {
+                        let user_agent_res = response.iter().find(|s| s.starts_with("User-Agent:"));
+
+                        let user_agent = match user_agent_res {
+                            Some(value) => value.split(": ").nth(1).unwrap_or(""),
+                            None => "",
+                        };
+
+                        let content_type = String::from("Content-type: text/plain");
+                        let content_len_header = format!("Content-length: {}", user_agent.len());
+                        Response::ok(
+                            vec![content_type, content_len_header],
+                            Some(user_agent.to_owned()),
                         )
                         .write_to(&mut stream);
                     }
