@@ -92,9 +92,10 @@ fn process(mut stream: TcpStream, dir: Option<String>) {
                 .unwrap_or(0);
 
             let filename = &s[7..];
+            let path = dir.map(|d| format!("{}/{}", d, filename)).unwrap();
             let body = read_body(&mut buffer, content_len);
 
-            let write_result = fs::write(filename, body);
+            let write_result = fs::write(path, body);
             if write_result.is_ok() {
                 Response::created().write_to(&mut stream);
             } else {
