@@ -1,22 +1,20 @@
 // Uncomment this block to pass the first stage
 use std::{
+    env, fs,
     io::{BufRead, BufReader, Write},
     net::{TcpListener, TcpStream},
     thread,
 };
 
 fn main() {
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    println!("Logs from your program will appear here!");
-
-    // Uncomment this block to pass the first stage
-    //
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
+    let directory = extract_directory();
 
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                thread::spawn(move || process(stream));
+                let dir = directory.clone();
+                thread::spawn(move || process(stream, dir));
             }
             Err(e) => {
                 println!("error: {}", e);
@@ -25,7 +23,29 @@ fn main() {
     }
 }
 
-fn process(mut stream: TcpStream) {
+fn extract_directory() -> Option<String> {
+    for (i, arg) in env::args().enumerate() {
+        if arg == "--directory" {
+            return env::args().nth(i + 1);
+        }
+    }
+
+    None
+}
+
+fn read_file(dir: Option<String>, filename: &str) -> Option<String> {
+    let path = dir.map(|d| {
+        let delimiter = if d.ends_with('/') { "" } else { "/" };
+        format!("{}{}{}", d, delimiter, filename)
+    });
+
+    match path {
+        Some(p) => fs::read_to_string(p).ok(),
+        None => None,
+    }
+}
+
+fn process(mut stream: TcpStream, dir: Option<String>) {
     println!("accepted new connection");
 
     let buffer = BufReader::new(&stream);
@@ -40,6 +60,21 @@ fn process(mut stream: TcpStream) {
     let path = response[0].split(' ').nth(1);
 
     match path {
+        Some(s) if s.starts_with("/files/") => {
+            let filename = &s[7..];
+            let file_res = read_file(dir, filename);
+
+            match file_res {
+                Some(content) => {
+                    let content_type = String::from("Content-type: application/octet-stream");
+                    let content_len = format!("Content-length: {}", content.len());
+
+                    Response::ok(vec![content_type, content_len], Some(content))
+                        .write_to(&mut stream);
+                }
+                None => Response::not_found().write_to(&mut stream),
+            }
+        }
         Some(s) if s.starts_with("/echo/") => {
             let echo = &s[6..];
             let content_type = String::from("Content-type: text/plain");
