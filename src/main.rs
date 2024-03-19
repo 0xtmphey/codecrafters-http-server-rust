@@ -1,12 +1,10 @@
 // Uncomment this block to pass the first stage
 use std::{
     env, fs,
-    io::{BufRead, BufReader, Read, Write},
+    io::{Write},
     net::{TcpListener, TcpStream},
     thread,
 };
-use anyhow::anyhow;
-use crate::header::HttpHeader;
 use crate::request::{HttpMethod, Request};
 
 mod request;
@@ -52,34 +50,12 @@ fn read_file(dir: Option<String>, filename: &str) -> Option<String> {
     }
 }
 
-fn read_headers(buffer: &mut BufReader<&TcpStream>) -> String {
-    let mut data = String::new();
-
-    let mut line = String::new();
-    loop {
-        buffer.read_line(&mut line).unwrap_or_default();
-        if line.starts_with("\r\n") {
-            break;
-        }
-
-        data.push_str(&line);
-        line.clear();
-    }
-    data
-}
-
-fn read_body(buffer: &mut BufReader<&TcpStream>, len: usize) -> String {
-    let mut body_bytes = vec![0; len];
-
-    buffer.read_exact(&mut body_bytes).unwrap_or_default();
-
-    String::from_utf8(body_bytes).unwrap_or(String::new())
-}
-
 fn process(mut stream: TcpStream, dir: Option<String>) {
     println!("accepted new connection");
 
     let request = Request::try_read(&mut stream);
+    
+    dbg!(&request);
 
     let response = match request {
         Ok(req) => handle_request(req, dir),
@@ -102,7 +78,7 @@ fn handle_request(req: Request, dir: Option<String>) -> Response {
                 .map_or("None".to_string(), |header| header.value.to_owned());
             let headers = vec![
                 format!("Content-Length: {}", user_agent.len()),
-                format!("Content-Type: {}", "text/plain")
+                format!("Content-Type: {}", "text/plain"),
             ];
             Response::ok(headers, Some(user_agent.to_owned()))
         }
@@ -111,7 +87,7 @@ fn handle_request(req: Request, dir: Option<String>) -> Response {
             let echo = &path[6..];
             let headers = vec![
                 format!("Content-Length: {}", echo.len()),
-                format!("Content-Type: {}", "text/plain")
+                format!("Content-Type: {}", "text/plain"),
             ];
             Response::ok(headers, Some(echo.to_string()))
         }
@@ -124,7 +100,7 @@ fn handle_request(req: Request, dir: Option<String>) -> Response {
                 Some(content) => {
                     let headers: Vec<String> = vec![
                         format!("Content-Length: {}", content.len()),
-                        format!("Content-Type: {}", "application/octet-stream")
+                        format!("Content-Type: {}", "application/octet-stream"),
                     ];
                     Response::ok(headers, Some(content))
                 }
