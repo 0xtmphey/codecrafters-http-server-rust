@@ -1,15 +1,19 @@
 // Uncomment this block to pass the first stage
 use std::{
-    env, fs,
-    io::{Write},
+    fs,
     net::{TcpListener, TcpStream},
     thread,
 };
-use crate::request::{HttpMethod, Request};
 
 mod request;
 mod errors;
 mod header;
+mod response;
+mod utils;
+
+use response::Response;
+use request::{HttpMethod, Request};
+use utils::{extract_directory, read_file};
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
@@ -28,34 +32,8 @@ fn main() {
     }
 }
 
-fn extract_directory() -> Option<String> {
-    for (i, arg) in env::args().enumerate() {
-        if arg == "--directory" {
-            return env::args().nth(i + 1);
-        }
-    }
-
-    None
-}
-
-fn read_file(dir: Option<String>, filename: &str) -> Option<String> {
-    let path = dir.map(|d| {
-        let delimiter = if d.ends_with('/') { "" } else { "/" };
-        format!("{}{}{}", d, delimiter, filename)
-    });
-
-    match path {
-        Some(p) => fs::read_to_string(p).ok(),
-        None => None,
-    }
-}
-
 fn process(mut stream: TcpStream, dir: Option<String>) {
-    println!("accepted new connection");
-
     let request = Request::try_read(&mut stream);
-
-    dbg!(&request);
 
     let response = match request {
         Ok(req) => handle_request(req, dir),
@@ -125,72 +103,5 @@ fn handle_request(req: Request, dir: Option<String>) -> Response {
         }
 
         (_, _) => Response::not_found(),
-    }
-}
-
-#[derive(Debug)]
-struct Response {
-    status_code: (usize, String),
-    headers: Vec<String>,
-    body: Option<String>,
-}
-
-impl Response {
-    fn as_string(&self) -> String {
-        let headers_str = self.headers.join("\r\n");
-        let status_str = format!("HTTP/1.1 {} {}", self.status_code.0, self.status_code.1);
-        let body_str = match &self.body {
-            Some(b) => b.as_str(),
-            None => "",
-        };
-
-        format!("{}\r\n{}\r\n\r\n{}", status_str, headers_str, body_str)
-    }
-
-    fn ok(headers: Vec<String>, body: Option<String>) -> Response {
-        Response {
-            status_code: (200, String::from("Ok")),
-            headers,
-            body,
-        }
-    }
-
-    fn empty_ok() -> Response {
-        Response {
-            status_code: (200, String::from("OK")),
-            headers: vec![],
-            body: None,
-        }
-    }
-
-    fn created() -> Self {
-        Response {
-            status_code: (201, String::from("Created")),
-            headers: vec![],
-            body: None,
-        }
-    }
-
-    fn not_found() -> Response {
-        Response {
-            status_code: (404, String::from("Not found")),
-            headers: vec![],
-            body: None,
-        }
-    }
-
-    fn error(e: anyhow::Error) -> Self {
-        Response {
-            status_code: (500, "ERROR".to_string()),
-            headers: vec![],
-            body: Some(e.to_string()),
-        }
-    }
-
-    fn write_to(&self, stream: &mut TcpStream) {
-        let binding = self.as_string();
-        let bytes = binding.as_bytes();
-
-        stream.write_all(bytes).expect("Failed")
     }
 }
