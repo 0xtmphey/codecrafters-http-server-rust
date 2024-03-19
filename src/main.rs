@@ -78,18 +78,18 @@ fn read_body(buffer: &mut BufReader<&TcpStream>, len: usize) -> String {
 
 fn process(mut stream: TcpStream, dir: Option<String>) {
     println!("accepted new connection");
-    
+
     let request = Request::try_read(&mut stream);
-    
-    let response = match request { 
-        Ok(req) => handle_request(req, dir).unwrap_or_else(Response::error),
+
+    let response = match request {
+        Ok(req) => handle_request(req, dir),
         Err(e) => Response::error(e),
-    }; 
-    
+    };
+
     response.write_to(&mut stream);
 }
 
-fn handle_request(req: Request, dir: Option<String>) -> Result<Response, anyhow::Error> {
+fn handle_request(req: Request, dir: Option<String>) -> Response {
     let path = req.path.strip_suffix('/').unwrap_or(req.path.as_str());
     let method = &req.method;
 
@@ -145,10 +145,10 @@ fn handle_request(req: Request, dir: Option<String>) -> Result<Response, anyhow:
         }
 
         (_, _) => Response::not_found(),
-    };
-    Err(anyhow!(""))
+    }
 }
 
+#[derive(Debug)]
 struct Response {
     status_code: (usize, String),
     headers: Vec<String>,
@@ -198,7 +198,7 @@ impl Response {
             body: None,
         }
     }
-    
+
     fn error(e: anyhow::Error) -> Self {
         Response {
             status_code: (500, "ERROR".to_string()),
