@@ -144,7 +144,7 @@ fn handle_request(req: Request, dir: Option<String>) -> Response {
             }
         }
 
-        (_, _) => Response::not_found(),
+        (_, _) => Response::empty_ok(),
     }
 }
 
