@@ -5,6 +5,13 @@ use std::{
     net::{TcpListener, TcpStream},
     thread,
 };
+use anyhow::anyhow;
+use crate::header::HttpHeader;
+use crate::request::{HttpMethod, Request};
+
+mod request;
+mod errors;
+mod header;
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
@@ -71,81 +78,75 @@ fn read_body(buffer: &mut BufReader<&TcpStream>, len: usize) -> String {
 
 fn process(mut stream: TcpStream, dir: Option<String>) {
     println!("accepted new connection");
+    
+    let request = Request::try_read(&mut stream);
+    
+    let response = match request { 
+        Ok(req) => handle_request(req, dir).unwrap_or_else(Response::error),
+        Err(e) => Response::error(e),
+    }; 
+    
+    response.write_to(&mut stream);
+}
 
-    let mut buffer = BufReader::new(&stream);
+fn handle_request(req: Request, dir: Option<String>) -> Result<Response, anyhow::Error> {
+    let path = req.path.strip_suffix('/').unwrap_or(req.path.as_str());
+    let method = &req.method;
 
-    let headers = read_headers(&mut buffer);
+    match (method, path) {
+        (HttpMethod::GET, "/") => Response::empty_ok(),
 
-    let response: Vec<_> = headers.split("\r\n").collect();
-
-    let first = response[0].split(' ').collect::<Vec<&str>>();
-    let method = first[0];
-    let path = first[1];
-
-    match path {
-        s if s.starts_with("/files/") && method == "POST" => {
-            let content_len = response
-                .iter()
-                .find(|it| it.to_lowercase().contains("content-length"))
-                .map(|header| header.split(": ").nth(1).unwrap())
-                .map(|len| len.parse::<usize>().unwrap_or(0))
-                .unwrap_or(0);
-
-            let filename = &s[7..];
-            let path = dir.map(|d| format!("{}/{}", d, filename)).unwrap();
-            let body = read_body(&mut buffer, content_len);
-
-            let write_result = fs::write(path, body);
-            if write_result.is_ok() {
-                Response::created().write_to(&mut stream);
-            } else {
-                Response::not_found().write_to(&mut stream);
-            }
+        (HttpMethod::GET, "/user-agent") => {
+            let user_agent = &req.headers.iter()
+                .find(|header| header.name.to_lowercase() == "user-agent")
+                .map_or("None".to_string(), |header| header.value.to_owned());
+            let headers = vec![
+                format!("Content-Length: {}", user_agent.len()),
+                format!("Content-Type: {}", "text/plain")
+            ];
+            Response::ok(headers, Some(user_agent.to_owned()))
         }
-        s if s.starts_with("/files/") && method == "GET" => {
-            let filename = &s[7..];
+
+        (HttpMethod::GET, path) if path.starts_with("/echo/") => {
+            let echo = &path[6..];
+            let headers = vec![
+                format!("Content-Length: {}", echo.len()),
+                format!("Content-Type: {}", "text/plain")
+            ];
+            Response::ok(headers, Some(echo.to_string()))
+        }
+
+        (HttpMethod::GET, path) if path.starts_with("/files/") => {
+            let filename = &path[7..];
             let file_res = read_file(dir, filename);
 
             match file_res {
                 Some(content) => {
-                    let content_type = String::from("Content-type: application/octet-stream");
-                    let content_len = format!("Content-length: {}", content.len());
-
-                    Response::ok(vec![content_type, content_len], Some(content))
-                        .write_to(&mut stream);
+                    let headers: Vec<String> = vec![
+                        format!("Content-Length: {}", content.len()),
+                        format!("Content-Type: {}", "application/octet-stream")
+                    ];
+                    Response::ok(headers, Some(content))
                 }
-                None => Response::not_found().write_to(&mut stream),
+                None => Response::not_found(),
             }
         }
-        s if s.starts_with("/echo/") => {
-            let echo = &s[6..];
-            let content_type = String::from("Content-type: text/plain");
-            let content_len_header = format!("Content-length: {}", echo.len());
-            Response::ok(
-                vec![content_type, content_len_header],
-                Some(echo.to_owned()),
-            )
-            .write_to(&mut stream);
-        }
-        s if s.starts_with("/user-agent") => {
-            let user_agent_res = response.iter().find(|s| s.starts_with("User-Agent:"));
 
-            let user_agent = match user_agent_res {
-                Some(value) => value.split(": ").nth(1).unwrap_or(""),
-                None => "",
-            };
+        (HttpMethod::POST, path) if path.starts_with("/files/") => {
+            let filename = &path[7..];
+            let write_path = dir.map(|d| format!("{}/{}", d, filename)).unwrap();
 
-            let content_type = String::from("Content-type: text/plain");
-            let content_len_header = format!("Content-length: {}", user_agent.len());
-            Response::ok(
-                vec![content_type, content_len_header],
-                Some(user_agent.to_owned()),
-            )
-            .write_to(&mut stream);
+            let write_result = fs::write(write_path, req.body.unwrap_or("".to_string()));
+            if write_result.is_ok() {
+                Response::created()
+            } else {
+                Response::not_found()
+            }
         }
-        "/" => Response::ok(vec![], None).write_to(&mut stream),
-        _ => Response::not_found().write_to(&mut stream),
+
+        (_, _) => Response::not_found(),
     };
+    Err(anyhow!(""))
 }
 
 struct Response {
@@ -174,6 +175,14 @@ impl Response {
         }
     }
 
+    fn empty_ok() -> Response {
+        Response {
+            status_code: (200, String::from("OK")),
+            headers: vec![],
+            body: None,
+        }
+    }
+
     fn created() -> Self {
         Response {
             status_code: (201, String::from("Created")),
@@ -187,6 +196,14 @@ impl Response {
             status_code: (404, String::from("Not found")),
             headers: vec![],
             body: None,
+        }
+    }
+    
+    fn error(e: anyhow::Error) -> Self {
+        Response {
+            status_code: (500, "ERROR".to_string()),
+            headers: vec![],
+            body: Some(e.to_string()),
         }
     }
 
