@@ -66,7 +66,11 @@ fn process(mut stream: TcpStream, dir: Option<String>) {
 }
 
 fn handle_request(req: Request, dir: Option<String>) -> Response {
-    let path = req.path.strip_suffix('/').unwrap_or(req.path.as_str());
+    let path = if req.path.ends_with("/") && req.path.len() > 1 {
+        req.path.strip_suffix("/").unwrap()
+    } else {
+        &req.path
+    };
     let method = &req.method;
 
     match (method, path) {
