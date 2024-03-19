@@ -54,7 +54,7 @@ fn process(mut stream: TcpStream, dir: Option<String>) {
     println!("accepted new connection");
 
     let request = Request::try_read(&mut stream);
-    
+
     dbg!(&request);
 
     let response = match request {
@@ -120,7 +120,7 @@ fn handle_request(req: Request, dir: Option<String>) -> Response {
             }
         }
 
-        (_, _) => Response::empty_ok(),
+        (_, _) => Response::not_found(),
     }
 }
 
